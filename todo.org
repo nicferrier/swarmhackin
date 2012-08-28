@@ -1,0 +1,85 @@
+
+* puppet stuff
+** install
+*** from apt
+**** python-software-properties
+***** for ppa adding
+**** tmux
+*** from file
+**** tmuxshell
+***** via vagrant dir?
+***** built from this repository
+***** should be put in /usr/bin/tmuxshell
+*** PPA
+**** sudo add-apt-repository -y ppa:cassou/emacs
+*** from ppa
+**** emacs
+***** this is just apt after the PPA is added
+** configure
+*** /etc/tmux.conf
+**** source [[file:./config-files/tmux.conf]]
+**** this ensures that unattached tmux sessions are destroyed
+*** /etc/emacs-snapshot/site-start.d/00-inhibit-quit.el
+**** source [[file:./config-files/site_start-00-inhibit-quit.el]]
+**** this ensures that emacs can't be killed in the usual way
+
+* how does it work
+** when the group needs to start we add a user
+*** we call make-session-user
+**** source [[file:./scripts/make-session-user]]
+*** it makes
+**** the skeleton directory
+**** an adduser config file
+**** a unique user for that /session/
+*** the session user contains the key files from everyone in the group
+** when the users ssh in they see emacs as a tmux shell
+*** users can't use shells from within emacs except eshell
+*** they can build packages and such like, presuming we have the tools on the VM
+** when the session has finished delete the user
+
+* webapp
+** register
+*** make me a user
+**** username
+**** password
+**** pubkey to use
+** make a group
+*** a group name
+*** a description
+*** owner
+**** the person who can start sessions
+*** some sort of status?
+**** is a session running on the group?
+** add me to a group
+*** associate me with a group
+*** TODO this should be a request thing but for now doesn't need to be
+** start a session on a group
+*** you are the owner of the group                               :constraint:
+
+* possible problems
+** people added after the user is created won't have their keys copied in
+*** or people removed
+** we need to poll the skel dir for changes
+*** or possibly just provide a button to do it.
+** garbage collection problem with tmux stuff in tmp
+*** this could be cleaned with a cron looking for valid users
+
+* history
+had the idea for this from technomancy's clojure talk about the
+seattle group.
+
+much of this was automation of what we'd done at woome or repurposing
+what I'd done before.
+
+The tmuxshell was necessary because tmux didn't, at time of writing,
+have a way of automatically starting or attaching to a named session,
+just through config files. Therefore I could not use tmux itself as a
+login shell but had to write my own.
+
+tmuxshell was written on the Heathrow Express as I travelled to the
+airport one day.
+
+I hacked together the whole of the session management in just 3 hours,
+at the airport due to a failed engine on my plane.
+
+I designed the webapp at the same time, saving coding it for later.

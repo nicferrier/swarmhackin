@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# $1 is the group name
+GROUPNAME=$1
+
+# This is the database of group keys
+# 
+# Under this root there should be 1 directory per group which in turn
+# should contain one file per user in the group with the SSH pub key
+# in it.
+KEY_DB_ROOT=/var/local/swarm/groupkeys
+
+# Make a temp directory for the skel dir
+SKELDIR=/tmp/swarm/skel/${GROUPNAME}-$$
+mkdir -p ${SKELDIR}/.ssh
+
+# Make the keys file from the database of user keys
+cat ${KEY_DB_ROOT}/${GROUPNAME}/* \
+    > ${SKELDIR}/.ssh/authorized_keys
+
+# Make a temp directory for the config file
+CONFDIR=/tmp/swarm/user-conf/${GROUPNAME}-$$
+mkdir -p $CONFDIR
+
+# Put the config file there
+cat <<EOF > $CONFDIR/adduser.conf
+SKEL=$SKELDIR
+DSHELL=/usr/bin/tmuxshell
+EOF
+
+# Make a temp username
+USERNAME=${GROUPNAME}-$$
+
+# Finally add the user
+adduser \
+    --conf $CONFDIR/adduser.conf \
+    --disabled-password \
+    --gecos="$GROUPNAME" \
+    $USERNAME
+
+# ... and spit it out.
+echo $USERNAME
+
+# End
