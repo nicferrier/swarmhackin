@@ -48,6 +48,14 @@
 (defconst swarmweb-cookie-name "swarm-user"
   "The name of the cookie we use for auth.")
 
+(defun swarmweb-list-keys ()
+  "Make an alist of the ssh-keys from the user database."
+  (elnode-db-map
+   (lambda (key user-data)
+     (when user-data
+       (kvdotassoc "key" user-data)))
+   swarmweb--user-db))
+
 (defun swarmweb--make-user (user-params)
   "Check the USER-PARAMS and store in the `swarmweb-auth-db'.
 
