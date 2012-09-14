@@ -26,7 +26,7 @@
 
 ;;; swarm-web code
 
-(elnode-app swarmweb-dir esxml kv)
+(elnode-app swarmweb-dir esxml kv uuid)
 
 (defconst swarmweb--user-db
   (elnode-db-make
@@ -48,6 +48,15 @@
 (defconst swarmweb-cookie-name "swarm-user"
   "The name of the cookie we use for auth.")
 
+(defconst swarmweb--group-db
+  (elnode-db-make
+   `(elnode-db-hash
+     :filename
+     ,(expand-file-name
+       (concat swarmweb-dir "group-db"))))
+  "The database where we store groups.")
+
+
 (defun swarmweb-list-keys ()
   "Make an alist of the ssh-keys from the user database."
   (elnode-db-map
@@ -66,10 +75,29 @@ Return the user alist."
         ;; FIXME not clear whether we should make a UUID for the user.
         (elnode-db-put
          username
-         (append
-          (list (cons "token" token))
-          user-params)
+         (acons "token" token user-params)
          swarmweb--user-db)))))
+
+(defun swarmweb--make-group (owner group-params)
+  "Make a group."
+  (let ((uuid (uuid-to-stringy (uuid-create)))
+        (plist (kvalist->plist group-params)))
+    (destructuring-bind (&key name description) plist
+      (elnode-db-put
+       uuid
+       (acons
+        "uuid" uuid
+        (acons "owner"
+               (assoc-default "email" owner)
+               group-params))
+       swarmweb--group-db))))
+
+(defun swarmweb-group-get (id)
+  (elnode-db-get id swarmweb--group-db))
+
+(defun swarmweb-group-list ()
+  "List out the groups."
+  (elnode-db-map (lambda (key value) value) swarmweb--group-db))
 
 (defun* swarmweb--login (httpcon
                         registered-page
@@ -118,17 +146,44 @@ Return the user alist."
           :username (plist-get plist :username )
           :password (plist-get plist :password)))))))
 
-(defun swarmweb-group-handler (httpcon)
+(defun swarmweb-group-create-handler (httpcon)
   "Handle the group page."
   (with-elnode-auth httpcon 'swarmweb-auth
-    (let ((user (swarmweb-get-user httpcon))
-          (group (concat swarmweb-dir "group.html")))
+    (let ((user (swarmweb-get-user httpcon)))
       (elnode-method httpcon
         (GET
-         (elnode-send-file httpcon group :replacements user))
+         (elnode-send-file
+          httpcon
+          (concat swarmweb-dir "group.html")
+          :replacements user))
         (POST
-         ;; What do we do?
-         (elnode-send-file httpcon (concat swarmweb-dir "made.html")))))))
+         (let* ((group-params
+                 (elnode-http-params
+                  httpcon "name" "description"))
+                (group (swarmweb--make-group user group-params)))
+           (elnode-send-file
+            httpcon (concat swarmweb-dir "made.html")
+            :replacements group)))))))
+
+(defun swarmweb-group-handler (httpcon)
+  "Handle a specific group page."
+  (with-elnode-auth httpcon 'swarmweb-auth
+    (let ((group (swarmweb-get-user httpcon)))
+      (elnode-method httpcon
+        (GET
+         ;; need to add existing groups?
+         (elnode-send-file
+          httpcon
+          (concat swarmweb-dir "group.html")
+          :replacements user))
+        (POST
+         (let* ((group-params
+                 (elnode-http-params
+                  httpcon "name" "description"))
+                (group (swarmweb--make-group user group-params)))
+           (elnode-send-file
+            httpcon (concat swarmweb-dir "made.html")
+            :replacements group)))))))
 
 (defun swarmweb-main-handler (httpcon)
   "The handler for the main page."
@@ -137,7 +192,7 @@ Return the user alist."
     ;; Else user is not authenticated so send the main file
     (elnode-send-file httpcon (concat swarmweb-dir "main.html"))))
 
-(defun swarmweb-router (httpcon)
+(define-elnode-handler swarmweb-router (httpcon)
   (let ((registered (concat swarmweb-dir "registered.html"))
         (css (concat swarmweb-dir "style.css")))
     (elnode-hostpath-dispatcher
@@ -147,7 +202,9 @@ Return the user alist."
             registered
             :replacements
             'swarmweb-session-vars))
-       ("^[^/]*//group/" . swarmweb-group-handler)
+       ("^[^/]*//group/$" . swarmweb-group-create-handler)
+       ("^[^/]*//group/\\(.*\\)$)" . swarmweb-group-handler)
+       ("^[^/]*//profile/" . swarmweb-user-profile-handler)
        ("^[^/]*//register/" . swarmweb-register-handler)
        ("^[^/]*//style.css" . ,(elnode-make-send-file css))
        ("^[^/]*//$" . swarmweb-main-handler)))))
