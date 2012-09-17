@@ -7,10 +7,14 @@
   "Make a user.
 
 Return the user and the params so they can be destructured."
-  (let ((params '(("username" . "nic")
-                  ("password" . "secret")
-                  ("email" . "nic@email.com")
-                  ("key" . "AFFSGSHhajsdkakdn"))))
+  ;; FIXME - need a better test make user
+  ;;
+  ;; ideally take arguments but default them... so we can make
+  ;; different users
+  (let ((params '((username . "nic")
+                  (password . "secret")
+                  (email . "nic@email.com")
+                  (key . "AFFSGSHhajsdkakdn"))))
     (list (swarmweb--make-user params) params)))
 
 (defmacro swarmweb--mock-db (&rest body)
@@ -30,7 +34,7 @@ Return the user and the params so they can be destructured."
             `(elnode-db-filter
               :source ,swarmweb--user-db
               :filter ,(lambda (key value)
-                               (cdr (assoc "token" value)))))))
+                               (cdr (assoc 'token value)))))))
      ,@body))
 
 (ert-deftest swarmweb--make-user ()
@@ -38,23 +42,23 @@ Return the user and the params so they can be destructured."
   (swarmweb--mock-db
     (destructuring-bind (user params) (swarmweb--test-make-user)
       ;; params get decorated with the token by the make-user
-      (let ((params+ (cons "token" (kvalist->keys params)))
+      (let ((params+ (cons 'token (kvalist->keys params)))
             (db-user (elnode-db-get "nic" swarmweb--user-db)))
         (should (equal (kvalist->keys user) params+))
         (should
-         (equal (aget user "username")
-                (aget params "username")))
+         (equal (aget user 'username)
+                (aget params 'username)))
         (should
-         (equal (aget user "email")
-                (aget params "email")))
+         (equal (aget user 'email)
+                (aget params 'email)))
         ;; Did the value get into the db?
         (should (equal (kvalist->keys db-user) params+))
         (should
-         (equal (aget db-user "username")
-                (aget params "username")))
+         (equal (aget db-user 'username)
+                (aget params 'username)))
         (should
-         (equal (aget db-user "email")
-                (aget params "email")))
+         (equal (aget db-user 'email)
+                (aget params 'email)))
         ;; Does the auth token work?
         (should (stringp (elnode-db-get "nic" swarmweb--auth-token-db)))))))
 
@@ -64,14 +68,56 @@ Return the user and the params so they can be destructured."
     (destructuring-bind (user params) (swarmweb--test-make-user)
       (let* ((group (swarmweb--make-group
                      user
-                     '(("name" . "my group")
-                       ("description" . "A test group"))))
+                     '((name . "my group")
+                       (description . "A test group"))))
              ;; Retrieve the group from the db using the key we made.
-            (db-group (elnode-db-get (aget group "uuid") swarmweb--group-db)))
+            (db-group (elnode-db-get (aget group 'uuid) swarmweb--group-db)))
         ;; Check we've got the details in the returned group details
-        (should (equal (aget group "name") "my group"))
+        (should (equal (aget group 'name) "my group"))
         ;; Check that we looked them up
         (should (equal group db-group))))))
+
+(defun swarmweb--test-grp-list (user)
+  (mapcar
+   (lambda (alist)
+     ;; Each record also has a uuid and an owner
+     (kvalist->filter-keys alist 'name 'description 'owner))
+   (kvalist->values
+    (swarmweb-group-list
+     (assoc-default 'email user)))))
+
+(ert-deftest swarmweb-group-list ()
+  "Test the group listing stuff."
+  (swarmweb--mock-db
+    ;; FIXME - we ought to make a 2nd user and a group with that user
+    ;; so that we test that a group created with it does not appear in
+    ;; the list
+    (destructuring-bind (user params) (swarmweb--test-make-user)
+      (let ((group1 `((name . "group 1")
+                      (description . "a test group")
+                      (owner . ,(aget user 'email))))
+            (group2 `((name . "group 2")
+                      (description . "a test group")
+                      (owner . ,(aget user 'email))))
+            (group3 `((name . "group 3")
+                      (description . "a test group")
+                      (owner . ,(aget user 'email)))))
+        (swarmweb--make-group
+         user
+         (kvalist->filter-keys group1 'name 'description))
+        (swarmweb--make-group
+         user
+         (kvalist->filter-keys group2 'name 'description))
+        (swarmweb--make-group
+         user
+         (kvalist->filter-keys group3 'name 'description))
+        (should
+         (equal
+          (sort (mapcar (lambda (a) (sort a 'kvcmp))
+                        (list group1 group2 group3)) 'kvcmp)
+          (sort (mapcar (lambda (a) (sort a 'kvcmp))
+                        (swarmweb--test-grp-list user)) 'kvcmp)))))))
+
 
 (ert-deftest swarmweb-register ()
   "Test registration."
@@ -100,12 +146,11 @@ Return the user and the params so they can be destructured."
          ("Set-Cookie"
           . ,(format ".*%s.*" swarmweb-cookie-name))))
       (should-elnode-response
-       (elnode-test-call
-        "/registered/"
-        :method "GET")
+       (elnode-test-call "/registered/" :method "GET")
        :status-code 200
        :body-match
        ".*<p>We've sent an email to test@example.com"))))
+
 
 (ert-deftest swarmweb-group ()
   "Test group making."
@@ -139,5 +184,26 @@ Return the user and the params so they can be destructured."
        :status-code 200
        :body-match "<p>The group <em>test-group</em> was made.*"))))
 
+(ert-deftest swarmweb-group-list ()
+  "Test group listing."
+  (swarmweb--mock-db
+    ;; Make a user
+    (destructuring-bind (user params) (swarmweb--test-make-user)
+      (let ((grp (swarmweb--make-group
+                  user
+                  '((name . "my group")
+                    (description . "A test group")))))
+        (with-elnode-mock-server 'swarmweb-router
+          (elnode-test-login 'swarmweb-auth "/group/" "nic" "secret")
+          (should-elnode-response
+           (elnode-test-call "/group/")
+           :status-code 200
+           :body-match
+           (format "<a href='/group/%s'>" (assoc-default 'uuid grp))))))))
+
+(ert-deftest swarmweb-html-a ()
+  (equal
+   "<a href='10'>ten</a>"
+   (swarmweb-html-a "a" "b" '(("a" . "10") ("b" . "ten")))))
 
 ;;; swarm-web-tests.el ends here
